@@ -3,6 +3,7 @@ import { OrganizationAuthority } from './organization.model';
 export interface Merchant {
   id?: string;
   authority?: OrganizationAuthority;
+  publicCompanyNumber: string,
   publicCompanyName: string;
   publicOwner: string;
   publicPhoneNumber: string;
@@ -41,6 +42,7 @@ export interface Merchant {
 }
 
 export interface MerchantRegistration {
+  publicCompanyNumber: string;
   publicCompanyName: string;
   email: string;
   password: string;

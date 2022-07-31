@@ -65,6 +65,7 @@ class MerchantDefinition extends EntityDefinition
 
             // public profile fields
             (new BoolField('public', 'public')),
+            (new StringField('public_company_number', 'publicCompanyName'))->addFlags(new Required()),
             (new StringField('public_company_name', 'publicCompanyName'))->addFlags(new Required()),
             (new StringField('public_owner', 'publicOwner'))->addFlags(),
             (new StringField('public_phone_number', 'publicPhoneNumber')),

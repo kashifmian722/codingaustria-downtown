@@ -101,7 +101,7 @@ class RegistrationController
             $context->getContext()
         );
 
-        $data = $requestData->only('publicCompanyName', 'email', 'password', 'salesChannelId');
+        $data = $requestData->only('publicCompanyNumber','publicCompanyName', 'email', 'password', 'salesChannelId');
         $this->registrationService->registerMerchant($data, $context);
 
         return new JsonResponse(['success' => true]);

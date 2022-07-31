@@ -2,13 +2,9 @@
 
 namespace Shopware\Production\Merchants\Content\Merchant\Services;
 
-use Shopware\Core\Checkout\Customer\CustomerEntity;
-use Shopware\Core\Checkout\Customer\Event\CustomerDoubleOptInRegistrationEvent;
-use Shopware\Core\Content\MailTemplate\Service\MailSender;
-use Shopware\Core\Content\Newsletter\Exception\SalesChannelDomainNotFoundException;
+use GuzzleHttp\Exception\RequestException;
 use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
-use Shopware\Core\Framework\DataAbstractionLayer\EntityRepositoryInterface;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Filter\EqualsFilter;
 use Shopware\Core\Framework\DataAbstractionLayer\Validation\EntityExists;
@@ -17,6 +13,7 @@ use Shopware\Core\Framework\Validation\DataValidationDefinition;
 use Shopware\Core\Framework\Validation\DataValidator;
 use Shopware\Core\Framework\Validation\Exception\ConstraintViolationException;
 use Shopware\Core\System\SalesChannel\SalesChannelContext;
+use Shopware\Production\Merchants\Content\Merchant\Exception\CompanyDoesNotExistException;
 use Shopware\Production\Merchants\Content\Merchant\Exception\EmailAlreadyExistsException;
 use Shopware\Production\Merchants\Content\Merchant\MerchantEntity;
 use Shopware\Production\Portal\Services\TemplateMailSender;
@@ -24,7 +21,6 @@ use Symfony\Component\Validator\Constraints\Email;
 use Symfony\Component\Validator\Constraints\Length;
 use Symfony\Component\Validator\Constraints\NotBlank;
 use Symfony\Component\Validator\Constraints\Type;
-use Twig\Environment;
 
 class RegistrationService
 {
@@ -43,14 +39,22 @@ class RegistrationService
      */
     private $templateMailSender;
 
+    /**
+     * @var FirmenbuchService
+     */
+    private $firmenbuchService;
+
     public function __construct(
         EntityRepository $merchantRepository,
         DataValidator $dataValidator,
-        TemplateMailSender $templateMailSender
-    ) {
+        TemplateMailSender $templateMailSender,
+        FirmenbuchService $firmenbuchService
+    )
+    {
         $this->merchantRepository = $merchantRepository;
         $this->dataValidator = $dataValidator;
         $this->templateMailSender = $templateMailSender;
+        $this->firmenbuchService = $firmenbuchService;
     }
 
     public function registerMerchant(array $parameters, SalesChannelContext $salesChannelContext): string
@@ -64,6 +68,18 @@ class RegistrationService
 
         if (!$this->isMailAvailable($parameters['email'])) {
             throw new EmailAlreadyExistsException('Email address is already taken');
+        }
+
+        try {
+            $this->firmenbuchService->getFirmenbuchEintrag(
+                $parameters['publicCompanyNumber'],
+                $parameters['publicCompanyName']
+            );
+        } catch (RequestException $exception) {
+            $errorJson = json_decode($exception->getResponse()->getBody()->getContents(), true);
+
+            $errorMsg = $errorJson['errorDetail'] ?? $errorJson['errorMsg'];
+            throw new CompanyDoesNotExistException($errorMsg);
         }
 
         $parameters['activationCode'] = Uuid::randomHex();
@@ -92,6 +108,7 @@ class RegistrationService
     protected function createValidationDefinition(SalesChannelContext $salesChannelContext): DataValidationDefinition
     {
         return (new DataValidationDefinition())
+            ->add('publicCompanyNumber', new Type('string'))
             ->add('publicCompanyName', new Type('string'))
             ->add('email', new Email())
             ->add('salesChannelId', new EntityExists(['entity' => 'sales_channel', 'context' => $salesChannelContext->getContext()]))

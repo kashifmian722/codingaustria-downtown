@@ -3,75 +3,128 @@
 namespace Kiener\MolliePayments\Factory;
 
 use Exception;
-use Kiener\MolliePayments\Config\Config;
+use Kiener\MolliePayments\MolliePayments;
+use Kiener\MolliePayments\Service\MollieApi\Client\MollieHttpClient;
+use Kiener\MolliePayments\Service\SettingsService;
+use Mollie\Api\Exceptions\IncompatiblePlatform;
 use Mollie\Api\MollieApiClient;
 use Psr\Log\LoggerInterface;
+use Shopware\Core\Framework\Context;
 use Shopware\Core\Kernel;
-use Symfony\Component\DependencyInjection\ContainerInterface;
 
 class MollieApiFactory
 {
-    /** @var ContainerInterface $container */
-    protected $container;
-
-    /** @var Config $config */
-    protected $config;
-
-    /** @var LoggerInterface */
-    protected $logger;
-
-    /** @var MollieApiClient $apiClient */
-    protected $apiClient;
 
     /**
-     * Create a new instance of MollieApiFactory.
-     *
-     * @param ContainerInterface $container
-     * @param Config $config
+     * @var MollieApiClient
+     */
+    private $apiClient;
+
+    /**
+     * @var SettingsService
+     */
+    private $settingsService;
+
+    /**
+     * @var LoggerInterface
+     */
+    private $logger;
+
+
+    /**
+     * @param SettingsService $settingsService
      * @param LoggerInterface $logger
      */
-    public function __construct(
-        ContainerInterface $container,
-        Config $config,
-        LoggerInterface $logger
-    )
+    public function __construct(SettingsService $settingsService, LoggerInterface $logger)
     {
-        $this->container = $container;
-        $this->config = $config;
+        $this->settingsService = $settingsService;
         $this->logger = $logger;
     }
 
     /**
      * Create a new instance of the Mollie API client.
+     * @param string|null $salesChannelId
      *
-     * @throws \Mollie\Api\Exceptions\IncompatiblePlatform
+     * @return MollieApiClient
+     * @throws IncompatiblePlatform
+     * @deprecated please use the getClient option in the future
      */
-    public function createClient()
+    public function createClient(?string $salesChannelId = null): MollieApiClient
     {
-        if ($this->apiClient === null) {
-            $this->apiClient = new MollieApiClient();
+        # the singleton approach here was too risky,
+        # everyone who used this was never able to switch api keys through sales channels.
+        # now its the same as getClient() -> should be combined one day
+        return $this->getClient($salesChannelId);
+    }
 
-            try {
-                // Set the API key
-                $this->apiClient->setApiKey(
-                    $this->config::testMode() ? $this->config::testApiKey() : $this->config::liveApiKey()
-                );
+    /**
+     * Returns a new instance of the Mollie API client.
+     *
+     * @param string|null $salesChannelId
+     *
+     * @return MollieApiClient
+     * @throws IncompatiblePlatform
+     */
+    public function getClient(?string $salesChannelId = null): MollieApiClient
+    {
+        $settings = $this->settingsService->getSettings($salesChannelId);
+        $apiKey = ($settings->isTestMode()) ? $settings->getTestApiKey() : $settings->getLiveApiKey();
 
-                // Add platform data
-                $this->apiClient->addVersionString(
-                    'Shopware/' .
-                    Kernel::SHOPWARE_FALLBACK_VERSION
-                );
+        return $this->buildClient($apiKey);
+    }
 
-                // @todo Add plugin version variable
-                $this->apiClient->addVersionString(
-                    'MollieShopware6/1.0.2'
-                );
-            } catch (Exception $e) {
-                $this->logger->error($e->getMessage(), [$e]);
-            }
+    /**
+     * @param string $salesChannelId
+     * @return MollieApiClient
+     */
+    public function getLiveClient(string $salesChannelId): MollieApiClient
+    {
+        $settings = $this->settingsService->getSettings($salesChannelId);
+        $apiKey = $settings->getLiveApiKey();
+
+        return $this->buildClient($apiKey);
+    }
+
+    /**
+     * @param string $salesChannelId
+     * @return MollieApiClient
+     */
+    public function getTestClient(string $salesChannelId): MollieApiClient
+    {
+        $settings = $this->settingsService->getSettings($salesChannelId);
+        $apiKey = $settings->getTestApiKey();
+
+        return $this->buildClient($apiKey);
+    }
+
+    /**
+     * @param string $apiKey
+     * @return MollieApiClient
+     */
+    private function buildClient(string $apiKey): MollieApiClient
+    {
+        try {
+
+            # in some rare peaks, the Mollie API might take a bit more time.
+            # so we set it a higher connect timeout, and also a high enough response timeout
+            $connectTimeout = 5;
+            $responseTimeout = 10;
+            $httpClient = new MollieHttpClient($connectTimeout, $responseTimeout);
+
+            $this->apiClient = new MollieApiClient($httpClient);
+
+            $this->apiClient->setApiKey($apiKey);
+
+            $this->apiClient->addVersionString('Shopware/' . Kernel::SHOPWARE_FALLBACK_VERSION);
+            $this->apiClient->addVersionString('MollieShopware6/' . MolliePayments::PLUGIN_VERSION);
+
+        } catch (Exception $e) {
+            $this->logger->error($e->getMessage(), [$e]);
         }
 
+        # TODO we should change to fail-fast one day, but not at this time!
         return $this->apiClient;
     }
+
+
 }

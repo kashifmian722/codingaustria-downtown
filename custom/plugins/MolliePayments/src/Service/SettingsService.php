@@ -4,77 +4,68 @@ namespace Kiener\MolliePayments\Service;
 
 use Kiener\MolliePayments\Setting\MollieSettingStruct;
 use Shopware\Core\Framework\Context;
-use Shopware\Core\Framework\DataAbstractionLayer\EntityRepositoryInterface;
-use Shopware\Core\Framework\DataAbstractionLayer\Exception\InconsistentCriteriaIdsException;
-use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
-use Shopware\Core\Framework\DataAbstractionLayer\Search\Filter\ContainsFilter;
-use Shopware\Core\System\SystemConfig\SystemConfigCollection;
-use Shopware\Core\System\SystemConfig\SystemConfigEntity;
+use Shopware\Core\System\SystemConfig\SystemConfigService;
 
 class SettingsService
 {
     public const SYSTEM_CONFIG_DOMAIN = 'MolliePayments.config.';
 
-    /** @var EntityRepositoryInterface $systemConfigRepository */
-    protected $systemConfigRepository;
+    const LIVE_API_KEY = 'liveApiKey';
+    const TEST_API_KEY = 'testApiKey';
+    const LIVE_PROFILE_ID = 'liveProfileId';
+    const TEST_PROFILE_ID = 'testProfileId';
 
-    public function __construct(EntityRepositoryInterface $systemConfigRepository)
+    /** @var SystemConfigService */
+    protected $systemConfigService;
+
+    public function __construct(
+        SystemConfigService $systemConfigService
+    )
     {
-        $this->systemConfigRepository = $systemConfigRepository;
+        $this->systemConfigService = $systemConfigService;
     }
 
     /**
      * Get Mollie settings from configuration.
      *
-     * @param Context|null $context
+     * @param string|null  $salesChannelId
+     *
      * @return MollieSettingStruct
-     * @throws InconsistentCriteriaIdsException
      */
-    public function getSettings(?Context $context = null) : MollieSettingStruct
+    public function getSettings(?string $salesChannelId = null): MollieSettingStruct
     {
         $structData = [];
+        $systemConfigData = $this->systemConfigService->getDomain(self::SYSTEM_CONFIG_DOMAIN, $salesChannelId, true);
 
-        /** @var SystemConfigCollection $settingsCollection */
-        $settingsCollection = $this->getMollieConfigurationCollection($context);
-
-        /** @var SystemConfigEntity $systemConfigEntity */
-        foreach ($settingsCollection as $systemConfigEntity)
-        {
-            $configurationKey = $systemConfigEntity->getConfigurationKey();
-            $identifier = (string) substr($configurationKey, \strlen(self::SYSTEM_CONFIG_DOMAIN));
-
-            if ($identifier === '') {
-                continue;
+        foreach ($systemConfigData as $key => $value) {
+            if (stripos($key, self::SYSTEM_CONFIG_DOMAIN) !== false) {
+                $structData[substr($key, strlen(self::SYSTEM_CONFIG_DOMAIN))] = $value;
+            } else {
+                $structData[$key] = $value;
             }
-
-            $structData[$identifier] = $systemConfigEntity->getConfigurationValue();
         }
 
         return (new MollieSettingStruct())->assign($structData);
     }
 
-    /**
-     * Get Mollie configuration collection.
-     *
-     * @param Context|null $context
-     * @return SystemConfigCollection
-     * @throws InconsistentCriteriaIdsException
-     */
-    protected function getMollieConfigurationCollection(?Context $context = null) : SystemConfigCollection
+    public function set(string $key, $value, ?string $salesChannelId = null): void
     {
-        // Set default context
-        if ($context === null) {
-            $context = Context::createDefaultContext();
+        $this->systemConfigService->set(self::SYSTEM_CONFIG_DOMAIN . $key, $value, $salesChannelId);
+    }
+
+    public function delete(string $key, ?string $salesChannelId = null): void
+    {
+        $this->systemConfigService->delete(self::SYSTEM_CONFIG_DOMAIN . $key, $salesChannelId);
+    }
+
+    public function setProfileId(?string $profileId, ?string $salesChannelId = null, bool $testMode = false): void
+    {
+        $key = $testMode ? self::TEST_PROFILE_ID : self::LIVE_PROFILE_ID;
+
+        if(!is_null($profileId)) {
+            $this->set($key, $profileId, $salesChannelId);
+        } else {
+            $this->delete($key, $salesChannelId);
         }
-
-        // Create filter criteria
-        $criteria = (new Criteria())
-            ->addFilter(new ContainsFilter('configurationKey', self::SYSTEM_CONFIG_DOMAIN));
-
-        /** @var SystemConfigCollection $systemConfigCollection */
-        $systemConfigCollection = $this->systemConfigRepository
-            ->search($criteria, $context)->getEntities();
-
-        return $systemConfigCollection;
     }
 }

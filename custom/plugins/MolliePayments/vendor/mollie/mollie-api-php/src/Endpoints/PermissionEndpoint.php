@@ -26,13 +26,13 @@ class PermissionEndpoint extends CollectionEndpointAbstract
      * endpoint uses one type of collection object.
      *
      * @param int $count
-     * @param object[] $_links
+     * @param \stdClass $_links
      *
      * @return PermissionCollection
      */
     protected function getResourceCollectionObject($count, $_links)
     {
-        return new PermissionCollection($this->client, $count, $_links);
+        return new PermissionCollection($count, $_links);
     }
 
     /**

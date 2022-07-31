@@ -22,7 +22,7 @@ class Refund extends BaseResource
     /**
      * The $amount that was refunded.
      *
-     * @var object
+     * @var \stdClass
      */
     public $amount;
 
@@ -67,7 +67,7 @@ class Refund extends BaseResource
     /**
      * The settlement amount
      *
-     * @var object
+     * @var \stdClass
      */
     public $settlementAmount;
 
@@ -79,7 +79,7 @@ class Refund extends BaseResource
     public $status;
 
     /**
-     * @var object[]
+     * @var \stdClass
      */
     public $_links;
 
@@ -121,6 +121,16 @@ class Refund extends BaseResource
     public function isTransferred()
     {
         return $this->status === RefundStatus::STATUS_REFUNDED;
+    }
+
+    /**
+     * Is this refund failed?
+     *
+     * @return bool
+     */
+    public function isFailed()
+    {
+        return $this->status === RefundStatus::STATUS_FAILED;
     }
 
     /**

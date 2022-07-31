@@ -35,7 +35,7 @@ class Organization extends BaseResource
     /**
      * The address of the organization.
      *
-     * @var object
+     * @var \stdClass
      */
     public $address;
 
@@ -56,7 +56,15 @@ class Organization extends BaseResource
     public $vatNumber;
 
     /**
-     * @var object[]
+     * The organization’s VAT regulation, if based in the European Union. Either "shifted"
+     * (VAT is shifted) or dutch (Dutch VAT rate).
+     *
+     * @var string|null
+     */
+    public $vatRegulation;
+
+    /**
+     * @var \stdClass
      */
     public $_links;
 }

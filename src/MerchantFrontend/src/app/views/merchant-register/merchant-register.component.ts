@@ -19,6 +19,7 @@ export class MerchantRegisterComponent implements OnInit {
   registerForm: FormGroup;
   registrationFinished = false;
   showDuplicateMailError = false;
+  showCompanyDoesNotExistError = false;
   private initialRegisterFormValues: any;
 
   @Input() registerModalOpen = true;
@@ -37,6 +38,7 @@ export class MerchantRegisterComponent implements OnInit {
 
   initializeForm(): void {
     this.registerForm = this.formBuilder.group({
+      companyNumber: ['', Validators.required],
       name: ['', Validators.required],
       mail: ['', [Validators.required, Validators.email]],
       password: ['', [Validators.required, Validators.minLength(8)]],
@@ -50,6 +52,7 @@ export class MerchantRegisterComponent implements OnInit {
 
   register(): void {
     const merchant: MerchantRegistration = {
+      publicCompanyNumber: this.registerForm.get('companyNumber').value,
       publicCompanyName: this.registerForm.get('name').value,
       email: this.registerForm.get('mail').value,
       password: this.registerForm.get('password').value,
@@ -67,6 +70,9 @@ export class MerchantRegisterComponent implements OnInit {
       (error) => {
         if("MERCHANT_EMAIL_ALREADY_EXISTS" === error.error.errors[0].code) {
           this.showDuplicateMailError = true;
+        }
+        if("MERCHANT_COMPANY_DOES_NOT_EXIST" === error.error.errors[0].code) {
+          this.showCompanyDoesNotExistError = true;
         }
         this.toastService.error(
           this.translateService.instant('MERCHANT.REGISTER.TOAST_MESSAGES.ERROR_HEADLINE')

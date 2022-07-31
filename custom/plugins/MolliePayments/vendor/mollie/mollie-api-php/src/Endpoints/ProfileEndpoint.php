@@ -10,8 +10,13 @@ use Mollie\Api\Resources\ProfileCollection;
 class ProfileEndpoint extends CollectionEndpointAbstract
 {
     protected $resourcePath = "profiles";
+
     protected $resourceClass = Profile::class;
 
+    /**
+     * @var string
+     */
+    const RESOURCE_ID_PREFIX = 'pfl_';
     /**
      * Get the object that is used by this API endpoint. Every API endpoint uses one type of object.
      *
@@ -26,7 +31,7 @@ class ProfileEndpoint extends CollectionEndpointAbstract
      * Get the collection object that is used by this API endpoint. Every API endpoint uses one type of collection object.
      *
      * @param int $count
-     * @param object[] $_links
+     * @param \stdClass $_links
      *
      * @return ProfileCollection
      */
@@ -46,7 +51,7 @@ class ProfileEndpoint extends CollectionEndpointAbstract
      */
     public function create(array $data = [], array $filters = [])
     {
-       return $this->rest_create($data, $filters);
+        return $this->rest_create($data, $filters);
     }
 
     /**
@@ -62,11 +67,31 @@ class ProfileEndpoint extends CollectionEndpointAbstract
      */
     public function get($profileId, array $parameters = [])
     {
-        if($profileId === 'me') {
+        if ($profileId === 'me') {
             return $this->getCurrent($parameters);
         }
 
         return $this->rest_read($profileId, $parameters);
+    }
+
+    /**
+     * Update a specific Profile resource.
+     *
+     * Will throw an ApiException if the profile id is invalid or the resource cannot be found.
+     *
+     * @param string $profileId
+     *
+     * @param array $data
+     * @return Profile
+     * @throws ApiException
+     */
+    public function update($profileId, array $data = [])
+    {
+        if (empty($profileId) || strpos($profileId, self::RESOURCE_ID_PREFIX) !== 0) {
+            throw new ApiException("Invalid profile id: '{$profileId}'. An profile id should start with '".self::RESOURCE_ID_PREFIX."'.");
+        }
+
+        return parent::rest_update($profileId, $data);
     }
 
     /**
@@ -115,6 +140,4 @@ class ProfileEndpoint extends CollectionEndpointAbstract
     {
         return $this->rest_list($from, $limit, $parameters);
     }
-
-
 }

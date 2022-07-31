@@ -33,7 +33,7 @@ class Mandate extends BaseResource
     public $method;
 
     /**
-     * @var object|null
+     * @var \stdClass|null
      */
     public $details;
 
@@ -60,7 +60,7 @@ class Mandate extends BaseResource
     public $signatureDate;
 
     /**
-     * @var object
+     * @var \stdClass
      */
     public $_links;
 
@@ -95,14 +95,14 @@ class Mandate extends BaseResource
      */
     public function revoke()
     {
-        if (!isset($this->_links->self->href)) {
+        if (! isset($this->_links->self->href)) {
             return $this;
         }
 
         $body = null;
-        if($this->client->usesOAuth()) {
+        if ($this->client->usesOAuth()) {
             $body = json_encode([
-                "testmode" => $this->mode === "test" ? true : false
+                "testmode" => $this->mode === "test" ? true : false,
             ]);
         }
 
@@ -114,5 +114,4 @@ class Mandate extends BaseResource
 
         return $result;
     }
-
 }

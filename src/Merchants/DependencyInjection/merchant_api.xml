@@ -9,6 +9,7 @@
             <argument type="service" id="merchant.repository"/>
             <argument type="service" id="Shopware\Core\Framework\Validation\DataValidator"/>
             <argument type="service" id="Shopware\Production\Portal\Services\TemplateMailSender"/>
+            <argument type="service" id="Shopware\Production\Merchants\Content\Merchant\Services\FirmenbuchService"/>
         </service>
 
         <service id="Shopware\Production\Merchants\Content\Merchant\Api\MerchantProductController" public="true">

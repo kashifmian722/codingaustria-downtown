@@ -7,7 +7,6 @@ use Kiener\MolliePayments\Handler\Method\BanContactPayment;
 use Kiener\MolliePayments\Handler\Method\BankTransferPayment;
 use Kiener\MolliePayments\Handler\Method\BelfiusPayment;
 use Kiener\MolliePayments\Handler\Method\CreditCardPayment;
-use Kiener\MolliePayments\Handler\Method\DirectDebitPayment;
 use Kiener\MolliePayments\Handler\Method\EpsPayment;
 use Kiener\MolliePayments\Handler\Method\GiftCardPayment;
 use Kiener\MolliePayments\Handler\Method\GiroPayPayment;
@@ -20,9 +19,19 @@ use Kiener\MolliePayments\Handler\Method\PayPalPayment;
 use Kiener\MolliePayments\Handler\Method\PaySafeCardPayment;
 use Kiener\MolliePayments\Handler\Method\Przelewy24Payment;
 use Kiener\MolliePayments\Handler\Method\SofortPayment;
+use Kiener\MolliePayments\Handler\Method\VoucherPayment;
+use Mollie\Api\Exceptions\ApiException;
+use Mollie\Api\MollieApiClient;
+use Mollie\Api\Resources\Method;
+use Mollie\Api\Resources\MethodCollection;
+use Mollie\Api\Resources\Order;
+use Shopware\Core\Checkout\Order\Aggregate\OrderTransaction\OrderTransactionEntity;
 use Shopware\Core\Checkout\Payment\PaymentMethodEntity;
+use Shopware\Core\Content\Media\MediaCollection;
+use Shopware\Core\Content\Media\MediaService;
 use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepositoryInterface;
+use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityWrittenContainerEvent;
 use Shopware\Core\Framework\DataAbstractionLayer\Exception\InconsistentCriteriaIdsException;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Filter\EqualsFilter;
@@ -30,36 +39,66 @@ use Shopware\Core\Framework\Plugin\Util\PluginIdProvider;
 
 class PaymentMethodService
 {
+    /** @var MediaService */
+    private $mediaService;
+
     /** @var EntityRepositoryInterface */
-    protected $paymentRepository;
+    private $paymentRepository;
 
     /** @var PluginIdProvider */
-    protected $pluginIdProvider;
+    private $pluginIdProvider;
 
     /** @var EntityRepositoryInterface */
-    protected $systemConfigRepository;
+    private $mediaRepository;
 
     /** @var string */
-    protected $className;
+    private $className;
 
     /**
      * PaymentMethodHelper constructor.
      *
+     * @param MediaService              $mediaService
+     * @param EntityRepositoryInterface $mediaRepository
      * @param EntityRepositoryInterface $paymentRepository
-     * @param PluginIdProvider $pluginIdProvider
-     * @param EntityRepositoryInterface $systemConfigRepository
-     * @param null $className
+     * @param PluginIdProvider          $pluginIdProvider
+     * @param null                      $className
      */
     public function __construct(
+        MediaService $mediaService,
+        EntityRepositoryInterface $mediaRepository,
         EntityRepositoryInterface $paymentRepository,
         PluginIdProvider $pluginIdProvider,
-        EntityRepositoryInterface $systemConfigRepository,
-        $className = null)
+        $className = null
+    )
     {
+        $this->mediaService = $mediaService;
+        $this->mediaRepository = $mediaRepository;
         $this->paymentRepository = $paymentRepository;
         $this->pluginIdProvider = $pluginIdProvider;
-        $this->systemConfigRepository = $systemConfigRepository;
         $this->className = $className;
+    }
+
+    /**
+     * Returns the payment repository.
+     *
+     * @return EntityRepositoryInterface
+     */
+    public function getRepository(): EntityRepositoryInterface
+    {
+        return $this->paymentRepository;
+    }
+
+    /**
+     * Sets the classname.
+     *
+     * @param string $className
+     *
+     * @return PaymentMethodService
+     */
+    public function setClassName(string $className): self
+    {
+        $this->className = $className;
+        return $this;
     }
 
     /**
@@ -75,14 +114,20 @@ class PaymentMethodService
         $paymentMethods = $this->getPaymentMethods($context);
 
         foreach ($paymentMethods as $paymentMethod) {
+            // Upload icon to the media repository
+            $mediaId = $this->getMediaId($paymentMethod, $context);
+
             // Build array of payment method data
             $paymentMethodData = [
                 'handlerIdentifier' => $paymentMethod['handler'],
                 'name' => $paymentMethod['description'],
+                'description' => '',
                 'pluginId' => $pluginId,
+                'mediaId' => $mediaId,
+                'afterOrderEnabled' => true,
                 'customFields' => [
-                    'mollie_payment_method_name' => $paymentMethod['name']
-                ]
+                    'mollie_payment_method_name' => $paymentMethod['name'],
+                ],
             ];
 
             // Get existing payment method so we can update it by it's ID
@@ -107,6 +152,75 @@ class PaymentMethodService
         if (count($paymentData)) {
             $this->paymentRepository->upsert($paymentData, $context);
         }
+    }
+
+    /**
+     * Activate payment methods in Shopware, based on Mollie.
+     *
+     * @param MollieApiClient $apiClient
+     * @param Context         $context
+     *
+     * @throws ApiException
+     */
+    public function activatePaymentMethods(MollieApiClient $apiClient, Context $context): void
+    {
+        /** @var MethodCollection $methods */
+        $methods = $apiClient->methods->allActive();
+
+        /** @var array $paymentMethods */
+        $paymentMethods = $this->getPaymentMethods();
+
+        $handlers = [];
+
+        if ($methods->count) {
+            /** @var Method $method */
+            foreach ($methods as $method) {
+                foreach ($paymentMethods as $paymentMethod) {
+                    if ($paymentMethod['name'] === $method->id) {
+                        $handlers[] = [
+                            'class' => $paymentMethod['handler'],
+                            'name' => $paymentMethod['description'],
+                        ];
+                    }
+                }
+            }
+        }
+
+        if (!empty($handlers)) {
+            foreach ($handlers as $handler) {
+                /** @var string|null $paymentMethodId */
+                $paymentMethodId = $this->getPaymentMethodId($handler['class'], $handler['name']);
+
+                if ((string) $paymentMethodId !== '') {
+                    $this->activatePaymentMethod($paymentMethodId, true, $context);
+                }
+            }
+        }
+    }
+
+    /**
+     * Activates a payment method in Shopware
+     *
+     * @param string       $paymentMethodId
+     * @param bool         $active
+     * @param Context|null $context
+     *
+     * @return EntityWrittenContainerEvent
+     */
+    public function activatePaymentMethod(
+        string $paymentMethodId,
+        bool $active = true,
+        Context $context = null
+    ): EntityWrittenContainerEvent
+    {
+        return $this->paymentRepository->upsert(
+            [
+                [
+                    'id' => $paymentMethodId,
+                    'active' => $active
+                ]
+            ],
+            $context ?? Context::createDefaultContext());
     }
 
     /**
@@ -135,9 +249,10 @@ class PaymentMethodService
     /**
      * Get payment method ID by name.
      *
+     * @param $handlerIdentifier
      * @param $name
+     *
      * @return string|null
-     * @throws InconsistentCriteriaIdsException
      */
     private function getPaymentMethodId($handlerIdentifier, $name) : ?string
     {
@@ -195,7 +310,7 @@ class PaymentMethodService
             BankTransferPayment::class,
             BelfiusPayment::class,
             CreditCardPayment::class,
-            DirectDebitPayment::class,
+            // DirectDebitPayment::class,   // Is removed for now because it's only used for recurring
             EpsPayment::class,
             GiftCardPayment::class,
             GiroPayPayment::class,
@@ -208,6 +323,70 @@ class PaymentMethodService
             PaySafeCardPayment::class,
             Przelewy24Payment::class,
             SofortPayment::class,
+            VoucherPayment::class,
         ];
+    }
+
+    /**
+     * Retrieve the icon from the database, or add it.
+     *
+     * @param array   $paymentMethod
+     * @param Context $context
+     *
+     * @return string
+     */
+    private function getMediaId(array $paymentMethod, Context $context): string
+    {
+        /** @var string $fileName */
+        $fileName = $paymentMethod['name'] . '-icon';
+
+        $criteria = new Criteria();
+        $criteria->addFilter(new EqualsFilter('fileName', $fileName));
+
+        /** @var MediaCollection $icons */
+        $icons = $this->mediaRepository->search($criteria, $context);
+
+        if ($icons->count() && $icons->first() !== null) {
+            return $icons->first()->getId();
+        }
+
+        // Add icon to the media library
+        $iconMime = 'image/svg+xml';
+        $iconExt = 'svg';
+        $iconBlob = file_get_contents('https://www.mollie.com/external/icons/payment-methods/' . $paymentMethod['name'] . '.svg');
+
+        if(empty(trim($iconBlob))) {
+            $iconBlob = file_get_contents('https://www.mollie.com/external/icons/payment-methods/' . $paymentMethod['name'] . '.png');
+            $iconMime = 'image/png';
+            $iconExt = 'png';
+        }
+
+        return $this->mediaService->saveFile(
+            $iconBlob,
+            $iconExt,
+            $iconMime,
+            $fileName,
+            $context,
+            'Mollie Payments - Icons',
+            null,
+            false
+        );
+    }
+
+    /**
+     * @param OrderTransactionEntity $transaction
+     * @param Order $mollieOrder
+     * @return bool
+     */
+    public function isPaidApplePayTransaction(OrderTransactionEntity $transaction, Order $mollieOrder) : bool {
+        $paymentMethodId = $transaction->getPaymentMethodId();
+        $paymentMethod = $transaction->getPaymentMethod();
+
+        if(!$paymentMethod instanceof PaymentMethodEntity) {
+            $criteria = new Criteria([$paymentMethodId]);
+            $paymentMethod = $this->paymentRepository->search($criteria, Context::createDefaultContext())->first();
+        }
+
+        return $paymentMethod->getHandlerIdentifier() === ApplePayPayment::class && $mollieOrder->isPaid() === true;
     }
 }

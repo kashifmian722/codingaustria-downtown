@@ -24,7 +24,7 @@ class InvoiceEndpoint extends CollectionEndpointAbstract
      * Get the collection object that is used by this API. Every API uses one type of collection object.
      *
      * @param int $count
-     * @param object[] $_links
+     * @param \stdClass $_links
      *
      * @return \Mollie\Api\Resources\BaseCollection
      */
@@ -73,6 +73,6 @@ class InvoiceEndpoint extends CollectionEndpointAbstract
      */
     public function all(array $parameters = [])
     {
-        return $this->page( null, null, $parameters);
+        return $this->page(null, null, $parameters);
     }
 }

@@ -8,16 +8,20 @@ use Shopware\Core\Checkout\Customer\CustomerDefinition;
 use Shopware\Core\Checkout\Order\OrderDefinition;
 use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepositoryInterface;
+use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Core\System\CustomField\CustomFieldTypes;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
 class CustomFieldService
 {
+    public const CUSTOM_FIELDS_KEY = 'customFields';
+    public const CUSTOM_FIELDS_KEY_MOLLIE_PAYMENTS = 'mollie_payments';
+
     /** @var ContainerInterface */
-    protected $container;
+    private $container;
 
     /** @var EntityRepositoryInterface */
-    protected $customFieldSetRepository;
+    private $customFieldSetRepository;
 
     /**
      * CustomFieldService constructor.
@@ -38,12 +42,12 @@ class CustomFieldService
     public function addCustomFields(Context $context)
     {
         try {
-            $customFieldSetId = 'cfc5bddd41594779a00cd4aa31885530';
-            $mollieOrderFieldId = '14cf2e774a67a3b3374b187948046038';
-            $iDealIssuerFieldId = '486a390718f043a28bc6434be6f36aec';
+            $mollieOrderFieldId = Uuid::randomHex();
+            $mollieCustomerFieldId = Uuid::randomHex();
+            $iDealIssuerFieldId = Uuid::randomHex();
 
             $this->customFieldSetRepository->upsert([[
-                'id' => $customFieldSetId,
+                'id' => Uuid::randomHex(),
                 'name' => 'mollie_payments',
                 'config' => [
                     'label' => [
@@ -52,12 +56,26 @@ class CustomFieldService
                 ],
                 'customFields' => [
                     [
+                        'id' => $mollieCustomerFieldId,
+                        'name' => 'customer_id',
+                        'type' => CustomFieldTypes::TEXT,
+                        'config' => [
+                            'componentName' => 'sw-field',
+                            'customFieldType' => CustomFieldTypes::TEXT,
+                            'customFieldPosition' => 1,
+                            'label' => [
+                                'en-GB' => 'Mollie customer ID',
+                                'nl-NL' => 'Mollie customer ID'
+                            ]
+                        ]
+                    ],
+                    [
                         'id' => $mollieOrderFieldId,
                         'name' => 'order_id',
                         'type' => CustomFieldTypes::TEXT,
                         'config' => [
                             'componentName' => 'sw-field',
-                            'customFieldType' => 'text',
+                            'customFieldType' => CustomFieldTypes::TEXT,
                             'customFieldPosition' => 1,
                             'label' => [
                                 'en-GB' => 'Mollie transaction ID',
@@ -71,7 +89,7 @@ class CustomFieldService
                         'type' => CustomFieldTypes::TEXT,
                         'config' => [
                             'componentName' => 'sw-field',
-                            'customFieldType' => 'text',
+                            'customFieldType' => CustomFieldTypes::TEXT,
                             'customFieldPosition' => 1,
                             'label' => [
                                 'en-GB' => 'Preferred iDeal issuer',
@@ -82,12 +100,16 @@ class CustomFieldService
                 ],
                 'relations' => [
                     [
+                        'id' => $mollieCustomerFieldId,
+                        'entityName' => CustomerDefinition::ENTITY_NAME
+                    ],
+                    [
                         'id' => $mollieOrderFieldId,
-                        'entityName' => $this->container->get(OrderDefinition::class)->getEntityName()
+                        'entityName' => OrderDefinition::ENTITY_NAME
                     ],
                     [
                         'id' => $iDealIssuerFieldId,
-                        'entityName' => $this->container->get(CustomerDefinition::class)->getEntityName()
+                        'entityName' => CustomerDefinition::ENTITY_NAME
                     ]
                 ]
             ]], $context);

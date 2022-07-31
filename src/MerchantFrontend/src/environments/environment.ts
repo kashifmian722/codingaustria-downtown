@@ -6,8 +6,8 @@ export const environment = {
   production: false,
   hubspotPortalId: '',
   hubspotFormId: '',
-  apiUrl: 'http://localhost',
-  accessKey: 'SWSCR2FPWJDMWU9HEXZLMTVWUG'
+  apiUrl: 'http://downtown.test',
+  accessKey: 'SWSCEKFUD090B29KY3NVRGOYMW'
 };
 
 /*

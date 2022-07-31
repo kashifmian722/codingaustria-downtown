@@ -2,8 +2,6 @@
 
 namespace Mollie\Api\Resources;
 
-use Mollie\Api\MollieApiClient;
-
 class Customer extends BaseResource
 {
     /**
@@ -41,7 +39,7 @@ class Customer extends BaseResource
     public $locale;
 
     /**
-     * @var object|mixed|null
+     * @var \stdClass|mixed|null
      */
     public $metadata;
 
@@ -56,27 +54,23 @@ class Customer extends BaseResource
     public $createdAt;
 
     /**
-     * @var object[]
+     * @var \stdClass
      */
     public $_links;
 
     /**
-     * @return Customer
+     * @return \Mollie\Api\Resources\BaseResource|\Mollie\Api\Resources\Customer
      */
     public function update()
     {
-        if (!isset($this->_links->self->href)) {
-            return $this;
-        }
-
-        $body = json_encode(array(
+        $body = [
             "name" => $this->name,
             "email" => $this->email,
             "locale" => $this->locale,
             "metadata" => $this->metadata,
-        ));
+        ];
 
-        $result = $this->client->performHttpCallToFullUrl(MollieApiClient::HTTP_PATCH, $this->_links->self->href, $body);
+        $result = $this->client->customers->update($this->id, $body);
 
         return ResourceFactory::createFromApiResult($result, new Customer($this->client));
     }
@@ -89,7 +83,7 @@ class Customer extends BaseResource
      */
     public function createPayment(array $options = [], array $filters = [])
     {
-        return $this->client->customerPayments->createFor($this, $options, $filters);
+        return $this->client->customerPayments->createFor($this, $this->withPresetOptions($options), $filters);
     }
 
     /**
@@ -110,7 +104,7 @@ class Customer extends BaseResource
      */
     public function createSubscription(array $options = [], array $filters = [])
     {
-        return $this->client->subscriptions->createFor($this, $options, $filters);
+        return $this->client->subscriptions->createFor($this, $this->withPresetOptions($options), $filters);
     }
 
     /**
@@ -121,7 +115,7 @@ class Customer extends BaseResource
      */
     public function getSubscription($subscriptionId, array $parameters = [])
     {
-        return $this->client->subscriptions->getFor($this, $subscriptionId, $parameters);
+        return $this->client->subscriptions->getFor($this, $subscriptionId, $this->withPresetOptions($parameters));
     }
 
     /**
@@ -152,7 +146,7 @@ class Customer extends BaseResource
      */
     public function createMandate(array $options = [], array $filters = [])
     {
-        return $this->client->mandates->createFor($this, $options, $filters);
+        return $this->client->mandates->createFor($this, $this->withPresetOptions($options), $filters);
     }
 
     /**
@@ -228,10 +222,21 @@ class Customer extends BaseResource
     private function getPresetOptions()
     {
         $options = [];
-        if($this->client->usesOAuth()) {
+        if ($this->client->usesOAuth()) {
             $options["testmode"] = $this->mode === "test" ? true : false;
         }
 
         return $options;
+    }
+
+    /**
+     * Apply the preset options.
+     *
+     * @param array $options
+     * @return array
+     */
+    private function withPresetOptions(array $options)
+    {
+        return array_merge($this->getPresetOptions(), $options);
     }
 }

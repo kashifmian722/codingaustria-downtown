@@ -2,36 +2,36 @@
 
 namespace Kiener\MolliePayments\Handler;
 
-use Exception;
-use Kiener\MolliePayments\Helper\PaymentStatusHelper;
-use Kiener\MolliePayments\Service\CustomerService;
-use Kiener\MolliePayments\Service\OrderService;
+use Kiener\MolliePayments\Exception\PaymentUrlException;
+use Kiener\MolliePayments\Facade\MolliePaymentDoPay;
+use Kiener\MolliePayments\Facade\MolliePaymentFinalize;
+use Kiener\MolliePayments\Service\LoggerService;
+use Kiener\MolliePayments\Service\Transition\TransactionTransitionServiceInterface;
 use Mollie\Api\Exceptions\ApiException;
-use Mollie\Api\MollieApiClient;
-use Mollie\Api\Resources\Order;
-use Mollie\Api\Types\PaymentStatus;
-use Psr\Log\LoggerInterface;
+use Monolog\Logger;
 use RuntimeException;
-use Shopware\Core\Checkout\Order\Aggregate\OrderTransaction\OrderTransactionStateHandler;
+use Shopware\Core\Checkout\Customer\CustomerEntity;
+use Shopware\Core\Checkout\Order\OrderEntity;
 use Shopware\Core\Checkout\Payment\Cart\AsyncPaymentTransactionStruct;
 use Shopware\Core\Checkout\Payment\Cart\PaymentHandler\AsynchronousPaymentHandlerInterface;
 use Shopware\Core\Checkout\Payment\Exception\CustomerCanceledAsyncPaymentException;
 use Shopware\Core\Framework\DataAbstractionLayer\Exception\InconsistentCriteriaIdsException;
-use Shopware\Core\System\Language\LanguageEntity;
 use Shopware\Core\Framework\Validation\DataBag\RequestDataBag;
-use Shopware\Core\System\Currency\CurrencyEntity;
 use Shopware\Core\System\Locale\LocaleEntity;
 use Shopware\Core\System\SalesChannel\SalesChannelContext;
-use Shopware\Production\Merchants\Content\Merchant\MerchantCollection;
-use Shopware\Production\Merchants\Content\Merchant\MerchantEntity;
+use Shopware\Core\System\StateMachine\Exception\IllegalTransitionException;
+use Shopware\Core\System\StateMachine\Exception\StateMachineInvalidEntityIdException;
+use Shopware\Core\System\StateMachine\Exception\StateMachineInvalidStateFieldException;
+use Shopware\Core\System\StateMachine\Exception\StateMachineNotFoundException;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\Routing\RouterInterface;
+use Throwable;
 
 class PaymentHandler implements AsynchronousPaymentHandlerInterface
 {
-    public const PAYMENT_METHOD_NAME = '';
-    public const PAYMENT_METHOD_DESCRIPTION = '';
+    protected const FIELD_ORDER_NUMBER = 'orderNumber';
+    protected const FIELD_BILLING_ADDRESS = 'billingAddress';
+    protected const FIELD_BILLING_EMAIL = 'billingEmail';
 
     /** @var string */
     protected $paymentMethod;
@@ -39,44 +39,46 @@ class PaymentHandler implements AsynchronousPaymentHandlerInterface
     /** @var array */
     protected $paymentMethodData = [];
 
-    /** @var OrderTransactionStateHandler */
-    private $transactionStateHandler;
+    /** @var LoggerService */
+    protected $logger;
 
-    /** @var OrderService */
-    private $orderService;
+    /** @var MolliePaymentDoPay */
+    private $payFacade;
 
-    /** @var CustomerService */
-    private $customerService;
+    /** @var TransactionTransitionServiceInterface */
+    private $transactionTransitionService;
 
-    /** @var MollieApiClient */
-    private $apiClient;
+    /** @var MolliePaymentFinalize */
+    private $finalizeFacade;
 
-    /** @var PaymentStatusHelper */
-    private $paymentStatusHelper;
-
-    /** @var LoggerInterface */
-    private $logger;
-
-    /** @var RouterInterface */
-    private $router;
-
+    /**
+     * PaymentHandler constructor.
+     */
     public function __construct(
-        OrderTransactionStateHandler $transactionStateHandler,
-        OrderService $orderService,
-        CustomerService $customerService,
-        MollieApiClient $apiClient,
-        PaymentStatusHelper $paymentStatusHelper,
-        LoggerInterface $logger,
-        RouterInterface $router
+        LoggerService                         $logger,
+        MolliePaymentDoPay                    $payFacade,
+        MolliePaymentFinalize                 $finalizeFacade,
+        TransactionTransitionServiceInterface $transactionTransitionService
     )
     {
-        $this->transactionStateHandler = $transactionStateHandler;
-        $this->orderService = $orderService;
-        $this->customerService = $customerService;
-        $this->apiClient = $apiClient;
-        $this->paymentStatusHelper = $paymentStatusHelper;
         $this->logger = $logger;
-        $this->router = $router;
+        $this->payFacade = $payFacade;
+        $this->transactionTransitionService = $transactionTransitionService;
+        $this->finalizeFacade = $finalizeFacade;
+    }
+
+    /**
+     * @param array $orderData
+     * @param OrderEntity $orderEntity
+     * @param SalesChannelContext $salesChannelContext
+     * @param CustomerEntity $customer
+     * @param LocaleEntity $locale
+     *
+     * @return array
+     */
+    public function processPaymentMethodSpecificParameters(array $orderData, OrderEntity $orderEntity, SalesChannelContext $salesChannelContext, CustomerEntity $customer): array
+    {
+        return $orderData;
     }
 
     /**
@@ -90,30 +92,58 @@ class PaymentHandler implements AsynchronousPaymentHandlerInterface
      * @param AsyncPaymentTransactionStruct $transaction
      * @param RequestDataBag $dataBag
      * @param SalesChannelContext $salesChannelContext
-     * @return RedirectResponse @see AsyncPaymentProcessException exception if an error ocurres while processing the payment
+     *
+     * @return RedirectResponse @see AsyncPaymentProcessException exception if an error ocurres while processing the
+     *                          payment
+     * @throws ApiException
      */
     public function pay(
         AsyncPaymentTransactionStruct $transaction,
-        RequestDataBag $dataBag,
-        SalesChannelContext $salesChannelContext
+        RequestDataBag                $dataBag,
+        SalesChannelContext           $salesChannelContext
     ): RedirectResponse
     {
-
-        # lets switch our mollie api key
-        # to the one from our current merchant
-        $apiKey = $this->getMerchantApiKey($transaction->getOrder()->getId(), $salesChannelContext);
-        $this->apiClient->setApiKey($apiKey);
-
-        /**
-         * Prepare the order for the Mollie Orders API and retrieve
-         * a payment URL to redirect the customer to in order
-         * to finish the payment.
-         */
         try {
-            $paymentUrl = $this->prepare($transaction, $salesChannelContext);
-        } catch (Exception $e) {
-            $this->logger->error($e->getMessage(), [$e]);
-            throw $e;
+            $paymentUrl = $this->payFacade->preparePayProcessAtMollie($this->paymentMethod, $transaction, $salesChannelContext, $this);
+        } catch (\Exception $exception) {
+            $this->logger->addEntry(
+                $exception->getMessage(),
+                $salesChannelContext->getContext(),
+                $exception,
+                [
+                    'function' => 'order-prepare',
+                ],
+                Logger::ERROR
+            );
+
+            throw new PaymentUrlException($transaction->getOrderTransaction()->getId(), $exception->getMessage());
+        } catch (Throwable $exception) {
+            $this->logger->addEntry(
+                $exception->getMessage(),
+                $salesChannelContext->getContext(),
+                null,
+                [
+                    'function' => 'order-prepare',
+                ],
+                Logger::CRITICAL
+            );
+
+            throw new PaymentUrlException($transaction->getOrderTransaction()->getId(), $exception->getMessage());
+        }
+
+        try {
+            $this->transactionTransitionService->processTransaction($transaction->getOrderTransaction(), $salesChannelContext->getContext());
+        } catch (\Exception $exception) {
+            // we only log failed transitions
+            $this->logger->addEntry(
+                sprintf('Could not set payment to in progress. Got error %s', $exception->getMessage()),
+                $salesChannelContext->getContext(),
+                $exception,
+                [
+                    'function' => 'order-prepare',
+                ],
+                Logger::WARNING
+            );
         }
 
         /**
@@ -121,7 +151,7 @@ class PaymentHandler implements AsynchronousPaymentHandlerInterface
          * customer is redirected back to Shopware's finish page, which
          * leads to the @finalize function.
          */
-        return RedirectResponse::create($paymentUrl);
+        return new RedirectResponse($paymentUrl);
     }
 
     /**
@@ -131,273 +161,42 @@ class PaymentHandler implements AsynchronousPaymentHandlerInterface
      *
      * @param AsyncPaymentTransactionStruct $transaction
      * @param Request $request
-     * @param SalesChannelContext $salesChannelContext @see AsyncPaymentFinalizeException exception if an error ocurres while calling an external payment API
-     * Throw a @throws RuntimeException*@throws CustomerCanceledAsyncPaymentException
+     * @param SalesChannelContext $salesChannelContext @see AsyncPaymentFinalizeException exception if an
+     *                                                           error ocurres while calling an external payment API
+     *                                                           Throw a @throws RuntimeException*@throws
+     *                                                           CustomerCanceledAsyncPaymentException
+     *
      * @throws CustomerCanceledAsyncPaymentException
      * @throws InconsistentCriteriaIdsException
-     * @throws \Shopware\Core\System\StateMachine\Exception\IllegalTransitionException
-     * @throws \Shopware\Core\System\StateMachine\Exception\StateMachineInvalidEntityIdException
-     * @throws \Shopware\Core\System\StateMachine\Exception\StateMachineInvalidStateFieldException
-     * @throws \Shopware\Core\System\StateMachine\Exception\StateMachineNotFoundException
+     * @throws IllegalTransitionException
+     * @throws StateMachineInvalidEntityIdException
+     * @throws StateMachineInvalidStateFieldException
+     * @throws StateMachineNotFoundException
      * @see CustomerCanceledAsyncPaymentException exception if the customer canceled the payment process on
      * payment provider page
      */
     public function finalize(AsyncPaymentTransactionStruct $transaction, Request $request, SalesChannelContext $salesChannelContext): void
     {
-        /**
-         * Retrieve the order from the transaction.
-         */
-        $order = $transaction->getOrder();
-
-        /**
-         * Retrieve the order's custom fields, or set an empty array.
-         */
-        $orderCustomFields = is_array($order->getCustomFields()) ? $order->getCustomFields() : [];
-
-        /**
-         * Retrieve the Mollie Order ID from the order custom fields. We use this
-         * to fetch the order from Mollie's Order API and retrieve it's payment status.
-         */
-        $mollieOrderId = $orderCustomFields['mollie_payments']['order_id'] ?? null;
-
-        if ($mollieOrderId === null) {
-            throw new RuntimeException('There is no Mollie order ID stored on order ' . $order->getOrderNumber());
-        }
-
-
-        # lets switch our mollie api key
-        # to the one from our current merchant
-        $apiKey = $this->getMerchantApiKey($order->getId(), $salesChannelContext);
-        $this->apiClient->setApiKey($apiKey);
-
-
-        /**
-         * Retrieve the order from Mollie's Orders API, so we can set the status of the order
-         * and payment in Shopware.
-         */
         try {
-            $mollieOrder = $this->apiClient->orders->get($mollieOrderId, [
-                'embed' => 'payments'
-            ]);
-        } catch (ApiException $e) {
-            $this->logger->error($e->getMessage(), [$e]);
-        }
-
-        /**
-         * If the Mollie order can't be fetched, throw an error.
-         */
-        if (!isset($mollieOrder)) {
-            throw new RuntimeException(
-                'We can\'t fetch the order ' . $order->getOrderNumber() . ' (' . $mollieOrderId . ') from the Orders API'
+            $this->finalizeFacade->finalize($transaction, $salesChannelContext);
+        } catch (CustomerCanceledAsyncPaymentException $exception) {
+            throw $exception;
+        } catch (Throwable $exception) {
+            $e = null;
+            if ($exception instanceof \Exception) {
+                $e = $exception;
+            }
+            $this->logger->addEntry(
+                $exception->getMessage(),
+                $salesChannelContext->getContext(),
+                $e,
+                null,
+                Logger::ERROR
             );
+
+            # ATTENTION, the second empty parameter is required
+            # in earlier Shopware 6.1.x versions, this was NOT optional!
+            throw new CustomerCanceledAsyncPaymentException($transaction->getOrderTransaction()->getId(), '');
         }
-
-        /**
-         * Process the payment status of the order. Returns a PaymentStatus string which
-         * we can use to throw an exception when the payment is cancelled.
-         */
-        try {
-            $paymentStatus = $this->paymentStatusHelper->processPaymentStatus(
-                $transaction->getOrderTransaction()->getId(),
-                $order,
-                $mollieOrder,
-                $salesChannelContext->getContext()
-            );
-        } catch (\Exception $e) {
-            $this->logger->error($e->getMessage(), [$e]);
-        }
-
-        /**
-         * If the payment was cancelled by the customer, throw an exception
-         * to let the shop handle the cancellation.
-         */
-        if (isset($paymentStatus) && $paymentStatus === PaymentStatus::STATUS_CANCELED) {
-            $this->transactionStateHandler
-                ->cancel($transaction->getOrderTransaction()->getId(), $salesChannelContext->getContext());
-
-            throw new CustomerCanceledAsyncPaymentException(
-                $transaction->getOrderTransaction()->getId(),
-                'Payment for order ' . $order->getOrderNumber() . ' (' . $mollieOrder->id . ') was cancelled by the customer.', ''
-            );
-        }
-    }
-
-
-    /**
-     * @param string $orderId
-     * @param SalesChannelContext $context
-     * @return string
-     */
-    private function getMerchantApiKey(string $orderId, SalesChannelContext $context): string
-    {
-        $order = $this->orderService->getOrder($orderId, $context->getContext());
-
-        /** @var MerchantCollection $merchants */
-        $merchants = $order->getExtension('merchants');
-
-        $merchList = $merchants->getElements();
-
-        /** @var MerchantEntity $merchant */
-        $merchant = array_shift($merchList);
-
-        if ($merchant->isMollieTestEnabled()) {
-            return $merchant->getMollieTestKey();
-        }
-
-        (string)$merchant->getMollieProdKey();
-    }
-
-    /**
-     * Prepares the order payload to send to Mollie's Orders API. Create
-     * an order based on this payload and retrieves a payment URL.
-     *
-     * @param AsyncPaymentTransactionStruct $transaction
-     * @param SalesChannelContext $salesChannelContext
-     * @return string|null
-     * @throws ApiException
-     */
-    public function prepare(AsyncPaymentTransactionStruct $transaction, SalesChannelContext $salesChannelContext): ?string
-    {
-        /**
-         * Retrieve the order from the order service in order to
-         * get an enriched order entity. This is necessary to have
-         * currency, locale and language available in the order entity.
-         */
-        $order = $this->orderService->getOrder($transaction->getOrder()->getId(), $salesChannelContext->getContext());
-        $order = $order ?? $transaction->getOrder();
-
-        /**
-         * Retrieve the customer from the customer service in order to
-         * get an enriched customer entity. This is necessary to have the
-         * customer's addresses available in the customer entity.
-         */
-        if ($order->getOrderCustomer() !== null) {
-            $customer = $this->customerService->getCustomer(
-                $order->getOrderCustomer()->getCustomerId(),
-                $salesChannelContext->getContext()
-            );
-        }
-
-        /**
-         * If no customer is stored on the order, fallback to the logged in
-         * customer in the sales channel context.
-         */
-        if ($customer === null) {
-            $customer = $salesChannelContext->getCustomer();
-        }
-
-        /**
-         * If the customer isn't present, there is something wrong with the order.
-         * Therefore we stop the process.
-         */
-        if ($customer === null) {
-            return null;
-        }
-
-        /**
-         * Retrieve currency information from the order. This information is
-         * necessary for the payload data that is sent to Mollie's Orders API.
-         *
-         * If the order has no currency, we retrieve it from the sales channel context.
-         *
-         * @var CurrencyEntity $currency
-         */
-        $currency = $order->getCurrency();
-
-        if ($currency === null) {
-            $currency = $salesChannelContext->getCurrency();
-        }
-
-        /**
-         * Retrieve locale information from the order. This information is
-         * necessary for the payload data that is sent to Mollie's Orders API.
-         *
-         * Based on this information, Mollie tries to deliver a payment screen
-         * in the customer's language.
-         *
-         * @var LanguageEntity $language
-         * @var LocaleEntity $locale
-         */
-        $locale = $order->getLanguage() !== null ? $order->getLanguage()->getLocale() : null;
-
-        /**
-         * Generate the URL for Mollie's webhook call. This webhook is used
-         * to handle payment updates.
-         *
-         * @var $webhookUrl
-         */
-        $webhookUrl = $this->router->generate('frontend.mollie.webhook', [
-            'transactionId' => $transaction->getOrderTransaction()->getId()
-        ], $this->router::ABSOLUTE_URL);
-
-        /**
-         * Build an array of order data to send in the request
-         * to Mollie's Orders API to create an order payment.
-         */
-        $orderData = [
-            'amount' => $this->orderService->getPriceArray(
-                $currency !== null ? $currency->getIsoCode() : 'EUR',
-                $order->getAmountTotal()
-            ),
-            'redirectUrl' => $transaction->getReturnUrl(),
-            'webhookUrl' => $webhookUrl,
-            'locale' => $locale !== null ? $locale->getCode() : null,
-            'method' => $this->paymentMethod,
-            'orderNumber' => $order->getOrderNumber(),
-            'lines' => $this->orderService->getOrderLinesArray($order),
-            'billingAddress' => $this->customerService->getAddressArray(
-                $customer->getDefaultBillingAddress(),
-                $customer
-            ),
-            'shippingAddress' => $this->customerService->getAddressArray(
-                $customer->getDefaultShippingAddress(),
-                $customer
-            ),
-            'payment' => []
-        ];
-
-        // Remove webhook URL on dev-environments
-        if (strtolower((string)getenv('APP_ENV')) === 'dev') {
-            unset($orderData['webhookUrl']);
-        }
-
-        $orderData = array_merge($orderData, $this->paymentMethodData);
-
-        /**
-         * Create an order at Mollie based on the prepared
-         * array of order data.
-         *
-         * @throws ApiException
-         * @var Order $mollieOrder
-         */
-        $mollieOrder = $this->apiClient->orders->create($orderData);
-
-        /**
-         * Store the ID of the created order at Mollie on the
-         * order in Shopware. We use this identifier to retrieve
-         * the order from Mollie after payment to set the order
-         * and payment status.
-         */
-        if (isset($mollieOrder, $mollieOrder->id)) {
-            $this->orderService->getRepository()->update([[
-                'id' => $order->getId(),
-                'customFields' => [
-                    'mollie_payments' => [
-                        'order_id' => $mollieOrder->id
-                    ]
-                ]
-            ]], $salesChannelContext->getContext());
-        }
-
-        /**
-         * Return the payment URL from the Mollie order, we redirect
-         * the customer to this URL to finish the payment.
-         *
-         * Afterwards, the customer is redirect to the finish page
-         * in Shopware, which leads to @finalize()
-         *
-         * @var string $paymentUrl
-         */
-        return isset($mollieOrder) ? $mollieOrder->getCheckoutUrl() : null;
     }
 }

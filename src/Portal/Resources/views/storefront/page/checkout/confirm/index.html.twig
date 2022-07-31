@@ -1,5 +1,35 @@
 {% sw_extends '@Storefront/storefront/page/checkout/confirm/index.html.twig' %}
 
+{% block page_checkout_confirm_payment_shipping %}
+    <div class="confirm-payment-shipping">
+        <div class="row">
+            {% block page_checkout_confirm_payment %}
+                <div class="col-sm-6 confirm-payment">
+                    {% sw_include '@Storefront/storefront/page/checkout/confirm/confirm-payment.html.twig' %}
+                </div>
+            {% endblock %}
+
+            {% block page_checkout_confirm_shipping %}
+                <div class="col-sm-6 confirm-shipping">
+                    {% sw_include '@Storefront/storefront/page/checkout/confirm/confirm-shipping.html.twig' %}
+                </div>
+            {% endblock %}
+        </div>
+        <div class="row">
+            {% block page_checkout_confirm_co2_calc %}
+                <div class="col-sm-12">
+                    <iframe
+                        frameborder="0"
+                        style="overflow:hidden;overflow-x:hidden;overflow-y:hidden;height:70vh;width:100%;position:relative;top:0px;left:0px;right:0px;bottom:0px"‚
+                        src="https://zingy-mousse-97cf96.netlify.app/"
+                        width="100%">
+                    </iframe>
+                </div>
+            {% endblock %}
+        </div>
+    </div>
+{% endblock %}
+
 {% block base_footer %}
     <footer class="footer-main">
         {% block base_footer_inner %}

@@ -58,7 +58,7 @@ class Profile extends BaseResource
     public $status;
 
     /**
-     * @var object
+     * @var \stdClass
      */
     public $review;
 
@@ -71,7 +71,7 @@ class Profile extends BaseResource
     public $createdAt;
 
     /**
-     * @var object[]
+     * @var \stdClass
      */
     public $_links;
 
@@ -100,25 +100,21 @@ class Profile extends BaseResource
     }
 
     /**
-     * @return Profile
+     * @return \Mollie\Api\Resources\BaseResource|\Mollie\Api\Resources\Profile
      * @throws ApiException
      */
     public function update()
     {
-        if (!isset($this->_links->self->href)) {
-            return $this;
-        }
-
-        $body = json_encode(array(
+        $body = [
             "name" => $this->name,
             "website" => $this->website,
             "email" => $this->email,
             "phone" => $this->phone,
             "categoryCode" => $this->categoryCode,
             "mode" => $this->mode,
-        ));
+        ];
 
-        $result = $this->client->performHttpCallToFullUrl(MollieApiClient::HTTP_PATCH, $this->_links->self->href, $body);
+        $result = $this->client->profiles->update($this->id, $body);
 
         return ResourceFactory::createFromApiResult($result, new Profile($this->client));
     }
@@ -131,7 +127,7 @@ class Profile extends BaseResource
      */
     public function chargebacks()
     {
-        if (!isset($this->_links->chargebacks->href)) {
+        if (! isset($this->_links->chargebacks->href)) {
             return new ChargebackCollection($this->client, 0, null);
         }
 
@@ -153,7 +149,7 @@ class Profile extends BaseResource
      */
     public function methods()
     {
-        if (!isset($this->_links->methods->href)) {
+        if (! isset($this->_links->methods->href)) {
             return new MethodCollection(0, null);
         }
 
@@ -201,7 +197,7 @@ class Profile extends BaseResource
      */
     public function payments()
     {
-        if (!isset($this->_links->payments->href)) {
+        if (! isset($this->_links->payments->href)) {
             return new PaymentCollection($this->client, 0, null);
         }
 
@@ -223,7 +219,7 @@ class Profile extends BaseResource
      */
     public function refunds()
     {
-        if (!isset($this->_links->refunds->href)) {
+        if (! isset($this->_links->refunds->href)) {
             return new RefundCollection($this->client, 0, null);
         }
 

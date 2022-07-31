@@ -50,6 +50,12 @@ class MerchantEntity extends Entity
      * @var string|null
      * @OA\Property()
      */
+    protected $publicCompanyNumber;
+
+    /**
+     * @var string|null
+     * @OA\Property()
+     */
     protected $publicOwner;
 
     /**
@@ -642,4 +648,19 @@ class MerchantEntity extends Entity
         return null;
     }
 
+    /**
+     * @return string|null
+     */
+    public function getPublicCompanyNumber(): ?string
+    {
+        return $this->publicCompanyNumber;
+    }
+
+    /**
+     * @param string|null $publicCompanyNumber
+     */
+    public function setPublicCompanyNumber(?string $publicCompanyNumber): void
+    {
+        $this->publicCompanyNumber = $publicCompanyNumber;
+    }
 }

@@ -31,7 +31,7 @@ class OrderEndpoint extends CollectionEndpointAbstract
      * endpoint uses one type of collection object.
      *
      * @param int $count
-     * @param object[] $_links
+     * @param \stdClass $_links
      *
      * @return OrderCollection
      */
@@ -52,6 +52,26 @@ class OrderEndpoint extends CollectionEndpointAbstract
     public function create(array $data = [], array $filters = [])
     {
         return $this->rest_create($data, $filters);
+    }
+
+    /**
+     * Update a specific Order resource
+     *
+     * Will throw a ApiException if the order id is invalid or the resource cannot be found.
+     *
+     * @param string $orderId
+     *
+     * @param array $data
+     * @return Order
+     * @throws ApiException
+     */
+    public function update($orderId, array $data = [])
+    {
+        if (empty($orderId) || strpos($orderId, self::RESOURCE_ID_PREFIX) !== 0) {
+            throw new ApiException("Invalid order ID: '{$orderId}'. An order ID should start with '".self::RESOURCE_ID_PREFIX."'.");
+        }
+
+        return parent::rest_update($orderId, $data);
     }
 
     /**
@@ -85,12 +105,13 @@ class OrderEndpoint extends CollectionEndpointAbstract
      *
      * @param string $orderId
      *
+     * @param array $parameters
      * @return Order
-     * @throws ApiException
+     * @throws \Mollie\Api\Exceptions\ApiException
      */
-    public function cancel($orderId)
+    public function cancel($orderId, $parameters = [])
     {
-        return $this->rest_delete($orderId);
+        return $this->rest_delete($orderId, $parameters);
     }
 
     /**

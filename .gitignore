@@ -1,3 +1,5 @@
+*.sql
+*.sql.gz
 
 /vendor/
 /bin/vendor/
