@@ -1,7 +1,6 @@
 {% sw_extends '@Storefront/storefront/page/checkout/confirm/index.html.twig' %}
 
 {% block page_checkout_confirm_payment_shipping %}
-    {{ dump(page) }}
     <div class="confirm-payment-shipping">
         <div class="row">
             {% block page_checkout_confirm_payment %}
@@ -25,7 +24,7 @@
                 {% endif %}
 
                 {% set deliveryType = page.extensions.additional_info.deliveryType %}
-                {% set total = 0 %}
+                {% set total = page.extensions.co2_data.co2GramsSavedMerchant %}
                 {% set carPickup = page.extensions.co2_data.co2GramsPickup %}
                 {% set delivery = page.extensions.co2_data.co2GramsDeliveryUnbundled %}
                 {% set bundle = page.extensions.co2_data.co2GramsDeliveryBundled %}
@@ -35,7 +34,7 @@
                     <iframe
                         frameborder="0"
                         style="overflow:hidden;overflow-x:hidden;overflow-y:hidden;height:85vh;width:100%;position:relative;top:0px;left:0px;right:0px;bottom:0px"‚
-                        src="https://zingy-mousse-97cf96.netlify.app/?car_pickup={{ carPickup }}&deliverytype={{ deliveryType }}&pickwalk={{ pickwalk }}&delivery=2&bundle=2;{{ bundle }}&total={{ total }}"
+                        src="https://zingy-mousse-97cf96.netlify.app/?car_pickup={{ carPickup }}&deliverytype={{ deliveryType }}&pickwalk={{ pickwalk }}&delivery=2&bundle=2;{{ bundle }}&total={{ total }}&lat_home=48.1577005&lng_home=16.3782227&lat_shop=48.240235287643756&lng_shop=16.485153472778876"
                         width="100%">
                     </iframe>
                 </div>
