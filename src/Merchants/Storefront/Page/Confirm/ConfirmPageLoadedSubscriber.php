@@ -2,9 +2,11 @@
 
 namespace Shopware\Production\Merchants\Storefront\Page\Confirm;
 
+use GuzzleHttp\ClientInterface;
 use Shopware\Core\Checkout\Shipping\ShippingMethodCollection;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepositoryInterface;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
+use Shopware\Core\Framework\Struct\ArrayStruct;
 use Shopware\Core\System\SalesChannel\SalesChannelContext;
 use Shopware\Production\Merchants\Content\Merchant\MerchantCollection;
 use Shopware\Production\Merchants\Content\Merchant\MerchantEntity;
@@ -17,6 +19,8 @@ use Shopware\Core\Checkout\Payment\PaymentMethodCollection;
 
 class ConfirmPageLoadedSubscriber
 {
+    private const API_URL = 'http://codingaustria-co2-calculator-backend.test/api/customer/pickup';
+
     /**
      * @var EntityRepositoryInterface
      */
@@ -27,10 +31,20 @@ class ConfirmPageLoadedSubscriber
      */
     private $eventDispatcher;
 
-    public function __construct(EntityRepositoryInterface $productRepository, EventDispatcherInterface $eventDispatcher)
+    /**
+     * @var ClientInterface
+     */
+    private $httpClient;
+
+    public function __construct(
+        EntityRepositoryInterface $productRepository,
+        EventDispatcherInterface $eventDispatcher,
+        ClientInterface $httpClient
+)
     {
         $this->productRepository = $productRepository;
         $this->eventDispatcher = $eventDispatcher;
+        $this->httpClient = $httpClient;
     }
 
     public function __invoke(CheckoutConfirmPageLoadedEvent $event): void
@@ -39,6 +53,38 @@ class ConfirmPageLoadedSubscriber
         if ($merchant === null) {
             return;
         }
+
+        $cart = $event->getPage()->getCart();
+        $delivery = $cart->getDeliveries()->first();
+        $shippingAddress = $delivery->getLocation()->getAddress();
+        $body = [
+            'merchantId' => $merchant->getId(),
+            'street' => $shippingAddress->getStreet(),
+            'city' => $shippingAddress->getCity(),
+            'zip' => $shippingAddress->getZipcode()
+        ];
+
+        $response = $this->httpClient->get(
+            self::API_URL,
+            ['query' => $body]
+        );
+
+        $content = $response->getBody()->getContents();
+        $event->getPage()->addExtension('co2_data', new ArrayStruct(json_decode($content, true)));
+
+        $deliveryType = 1;
+        switch($delivery->getShippingMethod()->getId()) {
+            case 'fe17b8d42bb541fd9bda50cfee4cec3a':
+                $deliveryType = 1;
+            case 'bf46f82df28c4103a32d26951834ef5d':
+                $deliveryType = 2;
+            case '7b0d18a44f844b9684b67292d1cd42f4':
+                $deliveryType = 3;
+            default:
+                $deliveryType = 1;
+        }
+
+        $event->getPage()->addExtension('additional_info', new ArrayStruct(['deliveryType' => $deliveryType]));
 
         $event->getPage()->addExtension('merchant', $merchant);
 

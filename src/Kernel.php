@@ -5,6 +5,7 @@ namespace Shopware\Production;
 use ReflectionMethod;
 use Shopware\Core\Kernel as ShopwareKernel;
 use Shopware\Core\Profiling\Doctrine\DebugStack;
+use Shopware\Production\LocalDelivery\LocalDeliveryBundle;
 use Shopware\Production\Merchants\MerchantBundle;
 use Shopware\Production\Organization\OrganizationBundle;
 use Shopware\Production\Portal\PortalBundle;
@@ -56,6 +57,6 @@ class Kernel extends ShopwareKernel
         yield new PortalBundle();
         yield new VoucherBundle();
         yield new OrganizationBundle();
-//        yield new LocalDeliveryBundle();
+        yield new LocalDeliveryBundle();
     }
 }
