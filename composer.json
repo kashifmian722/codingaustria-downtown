@@ -41,7 +41,7 @@
     ],
     "require": {
         "php": "~7.2",
-        "composer/package-versions-deprecated": "*",
+        "composer/package-versions-deprecated": "^1.8.0",
         "shopware\/core": "v6.3.*",
         "shopware\/administration": "v6.3.*",
         "shopware\/storefront": "v6.3.*",
